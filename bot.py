@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ── Env vars (configura en Railway) ──────────────────────────────────────────
-TELEGRAM_TOKEN = os.environ["8653215387:AAFNlm994JvJ3b1QwrPcpYfD5gR4NFkvXLU"]
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 MQTT_BROKER    = "broker.hivemq.com"
 MQTT_PORT      = 1883
 TOPIC_DATA     = "invernadero/orellanas"
