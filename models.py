@@ -8,7 +8,7 @@ Tablas:
 
 from sqlalchemy import Column, Integer, Float, String, DateTime
 from sqlalchemy.sql import func
-from .database import Base
+from database import Base
 
 
 class Telemetria(Base):
