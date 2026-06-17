@@ -13,8 +13,8 @@ import threading
 import time
 import paho.mqtt.client as mqtt
 
-from .database import SessionLocal
-from .models import Telemetria, Alerta
+from database import SessionLocal
+from models import Telemetria, Alerta
 
 # =====================================================================
 # CONFIGURACIÓN MQTT (debe coincidir con la del ESP32 / main.py)
