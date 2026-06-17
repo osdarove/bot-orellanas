@@ -21,9 +21,10 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
-from .database import Base, engine, get_db
-from . import models, schemas
-from .mqtt_client import iniciar_cliente_mqtt, publicar_comando, obtener_ultimo_estado
+from database import Base, engine, get_db
+import models
+import schemas
+from mqtt_client import iniciar_cliente_mqtt, publicar_comando, obtener_ultimo_estado
 
 # Comandos válidos que el ESP32 entiende (definidos en main.py)
 COMANDOS_VALIDOS = {
