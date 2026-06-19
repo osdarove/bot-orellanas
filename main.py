@@ -117,7 +117,6 @@ TIEMPO_MAX_BOMBA = 300   # segundos maximos continuos de funcionamiento
 
 bomba_estado = False          # Estado actual de la bomba (True = ON)
 bomba_tiempo_inicio = 0       # Marca de tiempo (ticks) cuando se encendio
-tiempo_total_bomba = 0        # Acumulado de segundos de funcionamiento (hoy)
 tanque_vacio = False           # Bandera de bloqueo por tanque vacio
 
 # Debounce/filtrado del flotador para evitar cambios rapidos por rebotes
@@ -125,8 +124,11 @@ flotador_ultimo_raw = flotador.value()
 flotador_count = 0
 FLOTADOR_STABLE_COUNT = 3  # numero de lecturas iguales necesarias antes de aceptar el cambio
 
-# Marca del ultimo ciclo para acumular tiempo de bomba encendida
-_ultimo_tick_acumulado = time.time()
+
+
+# Si se detecta tanque vacio, bloqueamos reencendido durante unos segundos
+TANQUE_LOCK_TIME = 10  # segundos de bloqueo tras tanque vacio estable
+ultimo_tanque_vacio_ts = 0
 
 # =====================================================================
 # VARIABLES DE CONTROL DE VENTILADOR
@@ -156,9 +158,9 @@ modo_ventilador = "auto"
 historial_humedad = []  # Guarda las ultimas 3 muestras de hum_promedio
 
 # =====================================================================
-# CONTROL DE ALARMAS (anti-spam: 1 misma alarma cada 30 min max)
+# CONTROL DE ALARMAS (anti-spam: 1 misma alarma cada 30 seg para testing)
 # =====================================================================
-INTERVALO_ALARMA = 1800  # 30 minutos en segundos
+INTERVALO_ALARMA = 30  # 30 segundos en segundos (cambiar a 1800 en producción)
 ultimas_alarmas = {}      # diccionario {evento: timestamp_ultimo_envio}
 
 # =====================================================================
@@ -548,6 +550,9 @@ def verificar_nivel_agua():
             # Primera vez estable que se detecta -> apagamos bomba y alertamos
             apagar_bomba(forzado_manual=True)
             publicar_alarma("tanque_vacio", "Nivel de agua bajo. Bomba bloqueada.")
+            # Registramos timestamp del vaciado para bloquear reencendidos
+            global ultimo_tanque_vacio_ts
+            ultimo_tanque_vacio_ts = time.time()
         tanque_vacio = True
     else:
         if tanque_vacio:
@@ -570,6 +575,13 @@ def encender_bomba(forzado_manual=False):
     if tanque_vacio:
         print("[BOMBA] Bloqueada: tanque vacio.")
         publicar_alarma("tanque_vacio", "Intento de encender bomba con tanque vacio.")
+        return
+
+    # Evitamos reencendidos inmediatos tras un vaciado reciente
+    global ultimo_tanque_vacio_ts
+    if ultimo_tanque_vacio_ts and (time.time() - ultimo_tanque_vacio_ts) < TANQUE_LOCK_TIME:
+        print("[BOMBA] Bloqueada temporalmente tras detección reciente de tanque vacio.")
+        publicar_evento("bomba_bloqueada_reciente", "Bloqueo temporal tras tanque vacio.")
         return
 
     if not bomba_estado:
@@ -609,32 +621,23 @@ def apagar_bomba(forzado_manual=False):
     print("[BOMBA] Apagada. Tiempo encendida: {}s".format(int(tiempo_encendida)))
 
 
-def actualizar_contador_bomba():
+def verificar_tiempo_maximo_bomba():
     """
-    Acumula el tiempo total de funcionamiento de la bomba
-    (tiempo_total_bomba) sumando los segundos transcurridos desde
-    la ultima actualizacion, solo si la bomba esta encendida.
-
-    Tambien controla el tiempo maximo de funcionamiento continuo:
+    Controla el tiempo maximo de funcionamiento continuo de la bomba:
     si se supera TIEMPO_MAX_BOMBA, apaga la bomba y genera alarma.
     """
-    global tiempo_total_bomba, _ultimo_tick_acumulado
+    if not bomba_estado:
+        return
 
     ahora = time.time()
-    delta = ahora - _ultimo_tick_acumulado
-    _ultimo_tick_acumulado = ahora
-
-    if bomba_estado:
-        tiempo_total_bomba += delta
-
-        tiempo_encendida = ahora - bomba_tiempo_inicio
-        if tiempo_encendida > TIEMPO_MAX_BOMBA:
-            print("[BOMBA] Tiempo maximo superado. Apagando por seguridad.")
-            apagar_bomba(forzado_manual=True)
-            publicar_alarma(
-                "tiempo_maximo_bomba",
-                "La bomba supero el tiempo maximo continuo de {}s".format(TIEMPO_MAX_BOMBA)
-            )
+    tiempo_encendida = ahora - bomba_tiempo_inicio
+    if tiempo_encendida > TIEMPO_MAX_BOMBA:
+        print("[BOMBA] Tiempo maximo superado. Apagando por seguridad.")
+        apagar_bomba(forzado_manual=True)
+        publicar_alarma(
+            "tiempo_maximo_bomba",
+            "La bomba supero el tiempo maximo continuo de {}s".format(TIEMPO_MAX_BOMBA)
+        )
 
 
 def control_automatico_bomba():
@@ -758,6 +761,8 @@ def publicar_telemetria(forzado=False):
     invernadero/orellanas. Se llama automaticamente cada
     INTERVALO_TELEMETRIA segundos, o de forma inmediata si
     forzado=True (por ejemplo, ante el comando 'estado').
+    
+    Construye el JSON como string para garantizar el orden exacto de campos.
     """
     global ultimo_envio_telemetria
 
@@ -767,32 +772,43 @@ def publicar_telemetria(forzado=False):
 
     ultimo_envio_telemetria = ahora
 
-    minutos_bomba_hoy = round(tiempo_total_bomba / 60, 2)
-
-    payload = {
-        "etapa": ETAPA,
-        "temp1": round(temp1, 1),
-        "hum1": round(hum1, 1),
-        "temp2": round(temp2, 1),
-        "hum2": round(hum2, 1),
-        "temp_promedio": round(temp_promedio, 1),
-        "hum_promedio": round(hum_promedio, 1),
-        "hum_control": round(hum_control, 1),
-        "bomba": "ON" if bomba_estado else "OFF",
-        "ventilador": "ON" if ventilador_estado else "OFF",
-        "modo": modo_bomba,
-        "tanque": "VACIO" if tanque_vacio else "OK",
-        "minutos_bomba_hoy": minutos_bomba_hoy
-    }
+    # Construir JSON como string para garantizar orden de campos
+    json_str = '{{' \
+        '"etapa": "{}", ' \
+        '"temp1": {}, ' \
+        '"hum1": {}, ' \
+        '"temp2": {}, ' \
+        '"hum2": {}, ' \
+        '"temp_promedio": {}, ' \
+        '"hum_promedio": {}, ' \
+        '"hum_control": {}, ' \
+        '"bomba": "{}", ' \
+        '"ventilador": "{}", ' \
+        '"modo": "{}", ' \
+        '"tanque": "{}"' \
+        '}}'.format(
+            ETAPA,
+            round(temp1, 1),
+            round(hum1, 1),
+            round(temp2, 1),
+            round(hum2, 1),
+            round(temp_promedio, 1),
+            round(hum_promedio, 1),
+            round(hum_control, 1),
+            "ON" if bomba_estado else "OFF",
+            "ON" if ventilador_estado else "OFF",
+            modo_bomba,
+            "VACIO" if tanque_vacio else "OK"
+        )
 
     try:
-        cliente_mqtt.publish(TOPICO_TELEMETRIA, ujson.dumps(payload))
-        print("[TELEMETRIA]", payload)
+        cliente_mqtt.publish(TOPICO_TELEMETRIA, json_str)
+        print("[TELEMETRIA]", json_str)
     except Exception as e:
         print("[TELEMETRIA] Error al publicar ({}). Reconectando MQTT...".format(e))
         try:
             conectar_mqtt()
-            cliente_mqtt.publish(TOPICO_TELEMETRIA, ujson.dumps(payload))
+            cliente_mqtt.publish(TOPICO_TELEMETRIA, json_str)
         except Exception as e2:
             print("[TELEMETRIA] Fallo definitivo al publicar:", e2)
 
@@ -838,8 +854,8 @@ def main():
             # ---------- Control automatico de bomba ----------
             control_automatico_bomba()
 
-            # ---------- Actualizacion de contador y tiempo maximo de bomba ----------
-            actualizar_contador_bomba()
+            # ---------- Verificacion de tiempo maximo de bomba ----------
+            verificar_tiempo_maximo_bomba()
 
             # ---------- Control automatico de ventilador ----------
             control_automatico_ventilador()

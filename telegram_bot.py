@@ -33,7 +33,7 @@ COMMANDS = [
 
 BASE_URL = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}'
 known_chats = set()
-state_request = {'event': None, 'payload': None}
+state_request = {'event': None, 'payload': None, 'processed': False}
 
 mqtt_client = mqtt.Client()
 
@@ -102,8 +102,9 @@ def on_message(client, userdata, msg):
             except Exception as e:
                 logger.exception('Failed sending alert to chat %s: %s', chat_id, e)
 
-    elif topic == MQTT_TOPIC_TELEMETRY and state_request['event'] is not None:
+    elif topic == MQTT_TOPIC_TELEMETRY and state_request['event'] is not None and not state_request['processed']:
         state_request['payload'] = payload
+        state_request['processed'] = True
         state_request['event'].set()
 
 
@@ -139,6 +140,7 @@ def handle_update(update):
         event = threading.Event()
         state_request['event'] = event
         state_request['payload'] = None
+        state_request['processed'] = False
 
         if event.wait(timeout=12):
             send_message(chat_id, f'Respuesta de estado:\n{state_request["payload"]}')
@@ -147,6 +149,7 @@ def handle_update(update):
 
         state_request['event'] = None
         state_request['payload'] = None
+        state_request['processed'] = False
         return
 
     if text in COMMANDS:
