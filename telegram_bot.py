@@ -11,6 +11,7 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 MQTT_BROKER = os.environ.get('MQTT_BROKER', 'broker.hivemq.com')
 MQTT_PORT = int(os.environ.get('MQTT_PORT', 1883))
 MQTT_TOPIC_CMDS = os.environ.get('MQTT_TOPIC_CMDS', 'invernadero/orellanas/cmd')
+MQTT_TOPIC_ALERTS = os.environ.get('MQTT_TOPIC_ALERTS', 'invernadero/orellanas/alertas')
 MQTT_TOPIC_TELEMETRY = os.environ.get('MQTT_TOPIC_TELEMETRY', 'invernadero/orellanas')
 
 logging.basicConfig(level=logging.INFO)
@@ -31,24 +32,23 @@ COMMANDS = [
 ]
 
 BASE_URL = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}'
+known_chats = set()
+state_request = {'event': None, 'payload': None}
 
-# Create a simple MQTT client used to publish commands
 mqtt_client = mqtt.Client()
-try:
-    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    mqtt_client.loop_start()
-except Exception as e:
-    logger.warning('Could not connect MQTT at startup: %s', e)
 
 
 def send_message(chat_id, text, keyboard=None):
     payload = {
         'chat_id': chat_id,
         'text': text,
-        'parse_mode': 'MarkdownV2',
     }
     if keyboard:
-        payload['reply_markup'] = json.dumps({'keyboard': keyboard, 'resize_keyboard': True, 'one_time_keyboard': False})
+        payload['reply_markup'] = {
+            'keyboard': keyboard,
+            'resize_keyboard': True,
+            'one_time_keyboard': False,
+        }
 
     resp = requests.post(f'{BASE_URL}/sendMessage', json=payload, timeout=10)
     resp.raise_for_status()
@@ -82,13 +82,29 @@ def publish_command(command):
             return False
 
 
-def on_telemetry(client, userdata, msg):
-    try:
-        payload = msg.payload.decode('utf-8')
-    except Exception:
-        payload = repr(msg.payload)
-    userdata['last_telemetry'] = payload
-    userdata['telemetry_event'].set()
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        logger.info('MQTT connected, suscribing to alerts and telemetry')
+        client.subscribe([(MQTT_TOPIC_ALERTS, 0), (MQTT_TOPIC_TELEMETRY, 0)])
+    else:
+        logger.warning('MQTT connect returned code %s', rc)
+
+
+def on_message(client, userdata, msg):
+    payload = msg.payload.decode('utf-8', errors='replace')
+    topic = msg.topic
+
+    if topic == MQTT_TOPIC_ALERTS:
+        logger.info('Alert received: %s', payload)
+        for chat_id in list(known_chats):
+            try:
+                send_message(chat_id, f'ALERTA: {payload}')
+            except Exception as e:
+                logger.exception('Failed sending alert to chat %s: %s', chat_id, e)
+
+    elif topic == MQTT_TOPIC_TELEMETRY and state_request['event'] is not None:
+        state_request['payload'] = payload
+        state_request['event'].set()
 
 
 def handle_update(update):
@@ -106,9 +122,12 @@ def handle_update(update):
         if '@' in text:
             text = text.split('@', 1)[0]
 
+    known_chats.add(chat_id)
+
     if text == 'start':
         keyboard = build_keyboard()
-        send_message(chat_id, 'Comandos disponibles:', keyboard)
+        help_text = 'Comandos disponibles:\n' + '\n'.join(f'- {c}' for c in COMMANDS)
+        send_message(chat_id, help_text, keyboard)
         return
 
     if text == 'estado':
@@ -117,25 +136,17 @@ def handle_update(update):
             send_message(chat_id, 'Error enviando comando de estado al dispositivo.')
             return
 
-        telemetry_data = {'last_telemetry': None, 'telemetry_event': threading.Event()}
-        temp_client = mqtt.Client(userdata=telemetry_data)
-        temp_client.on_message = on_telemetry
+        event = threading.Event()
+        state_request['event'] = event
+        state_request['payload'] = None
 
-        try:
-            temp_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-            temp_client.subscribe(MQTT_TOPIC_TELEMETRY)
-            temp_client.loop_start()
+        if event.wait(timeout=12):
+            send_message(chat_id, f'Respuesta de estado:\n{state_request["payload"]}')
+        else:
+            send_message(chat_id, 'No se obtuvo respuesta de estado en 12 segundos.')
 
-            if telemetry_data['telemetry_event'].wait(timeout=12):
-                send_message(chat_id, f'Respuesta de estado:\n{telemetry_data["last_telemetry"]}')
-            else:
-                send_message(chat_id, 'No se obtuvo respuesta de estado en 12 segundos.')
-        except Exception as e:
-            logger.exception('Error al obtener telemetria: %s', e)
-            send_message(chat_id, 'Error recibiendo respuesta de estado.')
-        finally:
-            temp_client.loop_stop()
-            temp_client.disconnect()
+        state_request['event'] = None
+        state_request['payload'] = None
         return
 
     if text in COMMANDS:
@@ -162,6 +173,14 @@ def main():
     if not TELEGRAM_TOKEN:
         logger.error('TELEGRAM_TOKEN no configurado. Exporta la variable de entorno.')
         return
+
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_message = on_message
+    try:
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        mqtt_client.loop_start()
+    except Exception as e:
+        logger.exception('Could not start MQTT client: %s', e)
 
     offset = None
     logger.info('Starting Telegram polling bot')

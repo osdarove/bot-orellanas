@@ -34,7 +34,8 @@ from umqtt.simple import MQTTClient
 # =====================================================================
 # CONFIGURACION GENERAL WIFI
 # =====================================================================
-
+WIFI_SSID = "FAMILIA_VENEGAS"
+WIFI_PASSWORD = "20677289"
 
 # =====================================================================
 # CONFIGURACION MQTT
@@ -266,6 +267,7 @@ def mqtt_callback(topic, msg):
         modo_bomba = "auto"
         modo_ventilador = "auto"
         vent_forzado_temp = False
+        publicar_evento("modo_auto", "Modo automatico activado (bomba y ventilador).")
         print("[CMD] Modo automatico activado (bomba y ventilador).")
 
     # ----------------- CONTROL MANUAL DE BOMBA -----------------
@@ -293,6 +295,7 @@ def mqtt_callback(topic, msg):
     elif comando == "vent_auto":
         modo_ventilador = "auto"
         vent_forzado_temp = False
+        publicar_evento("vent_auto", "Ventilador vuelve a modo automatico.")
         print("[CMD] Ventilador vuelve a modo automatico.")
 
     # ----------------- CAMBIO DE ETAPA DE CULTIVO -----------------
@@ -305,6 +308,7 @@ def mqtt_callback(topic, msg):
                 "cambio_etapa",
                 "Etapa cambiada de {} a {}".format(etapa_anterior, ETAPA)
             )
+            publicar_evento("cambio_etapa", "Etapa cambiada de {} a {}".format(etapa_anterior, ETAPA))
         print("[CMD] Etapa de cultivo establecida en:", ETAPA)
 
     # ----------------- SOLICITUD DE ESTADO INMEDIATO -----------------
@@ -375,6 +379,29 @@ def verificar_mqtt():
 # =====================================================================
 # FUNCION: PUBLICAR ALARMA (CON ANTI-SPAM)
 # =====================================================================
+def publicar_evento(evento, mensaje=""):
+    """
+    Publica un evento de accion en el topico de alertas MQTT.
+    Estos mensajes no tienen el filtro anti-spam de alarmas.
+    """
+    payload = {
+        "evento": evento,
+        "mensaje": mensaje,
+        "timestamp": time.time()
+    }
+
+    try:
+        cliente_mqtt.publish(TOPICO_ALERTAS, ujson.dumps(payload))
+        print("[EVENTO] Publicado:", payload)
+    except Exception as e:
+        print("[EVENTO] Error publicando evento ({}). Reconectando MQTT...".format(e))
+        try:
+            conectar_mqtt()
+            cliente_mqtt.publish(TOPICO_ALERTAS, ujson.dumps(payload))
+        except Exception as e2:
+            print("[EVENTO] Fallo definitivo al publicar:", e2)
+
+
 def publicar_alarma(evento, mensaje=""):
     """
     Publica una alarma en el topico de alertas MQTT, evitando reenviar
@@ -504,7 +531,8 @@ def verificar_nivel_agua():
             publicar_alarma("tanque_vacio", "Nivel de agua bajo. Bomba bloqueada.")
         tanque_vacio = True
     else:
-        # Hay agua en el tanque -> se libera el bloqueo
+        if tanque_vacio:
+            publicar_evento("tanque_ok", "Nivel de agua normal. Bloqueo de bomba liberado.")
         tanque_vacio = False
 
 
@@ -530,6 +558,7 @@ def encender_bomba(forzado_manual=False):
         bomba_estado = True
         bomba_tiempo_inicio = time.time()
         publicar_alarma("bomba_on", "Bomba encendida.")
+        publicar_evento("bomba_on", "Bomba encendida.")
         print("[BOMBA] Encendida.")
 
 
@@ -557,6 +586,7 @@ def apagar_bomba(forzado_manual=False):
     rele_bomba.value(0)
     bomba_estado = False
     publicar_alarma("bomba_off", "Bomba apagada.")
+    publicar_evento("bomba_off", "Bomba apagada.")
     print("[BOMBA] Apagada. Tiempo encendida: {}s".format(int(tiempo_encendida)))
 
 
@@ -618,8 +648,10 @@ def encender_ventilador():
     Enciende el rele del ventilador (activo en HIGH).
     """
     global ventilador_estado
-    rele_ventilador.value(1)
-    ventilador_estado = True
+    if not ventilador_estado:
+        rele_ventilador.value(1)
+        ventilador_estado = True
+        publicar_evento("vent_on", "Ventilador encendido.")
 
 
 def apagar_ventilador():
@@ -627,8 +659,10 @@ def apagar_ventilador():
     Apaga el rele del ventilador (activo en HIGH).
     """
     global ventilador_estado
-    rele_ventilador.value(0)
-    ventilador_estado = False
+    if ventilador_estado:
+        rele_ventilador.value(0)
+        ventilador_estado = False
+        publicar_evento("vent_off", "Ventilador apagado.")
 
 
 def control_automatico_ventilador():
@@ -660,6 +694,10 @@ def control_automatico_ventilador():
                 "temperatura_alta",
                 "Temperatura promedio {}C >= {}C. Ventilador forzado ON.".format(
                     temp_promedio, TEMP_VENT_ON)
+            )
+            publicar_evento(
+                "vent_forzado_on",
+                "Temperatura alta. Ventilador forzado ON." 
             )
         encender_ventilador()
         return  # El forzado por temperatura tiene prioridad total
