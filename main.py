@@ -120,6 +120,11 @@ bomba_tiempo_inicio = 0       # Marca de tiempo (ticks) cuando se encendio
 tiempo_total_bomba = 0        # Acumulado de segundos de funcionamiento (hoy)
 tanque_vacio = False           # Bandera de bloqueo por tanque vacio
 
+# Debounce/filtrado del flotador para evitar cambios rapidos por rebotes
+flotador_ultimo_raw = flotador.value()
+flotador_count = 0
+FLOTADOR_STABLE_COUNT = 3  # numero de lecturas iguales necesarias antes de aceptar el cambio
+
 # Marca del ultimo ciclo para acumular tiempo de bomba encendida
 _ultimo_tick_acumulado = time.time()
 
@@ -523,10 +528,24 @@ def verificar_nivel_agua():
 
     nivel = flotador.value()
 
+    # Filtrado: requerimos varias lecturas consecutivas iguales para aceptar cambios
+    global flotador_ultimo_raw, flotador_count
+
+    if nivel == flotador_ultimo_raw:
+        flotador_count += 1
+    else:
+        flotador_count = 1
+        flotador_ultimo_raw = nivel
+
+    if flotador_count < FLOTADOR_STABLE_COUNT:
+        # No hay estabilidad aun, ignoramos esta lectura
+        return
+
+    # Solo actuamos cuando el valor se ha mantenido estable
     if nivel == 1:
         # Tanque vacio detectado
         if not tanque_vacio:
-            # Primera vez que se detecta -> apagamos bomba y alertamos
+            # Primera vez estable que se detecta -> apagamos bomba y alertamos
             apagar_bomba(forzado_manual=True)
             publicar_alarma("tanque_vacio", "Nivel de agua bajo. Bomba bloqueada.")
         tanque_vacio = True

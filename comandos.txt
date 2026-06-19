@@ -8,3 +8,6 @@ git config --global user.email "osdarove@gmail.com"
 
 
 test
+
+
+py -m mpremote connect COM5 fs put main.py :main.py
