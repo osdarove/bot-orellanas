@@ -122,7 +122,7 @@ tanque_vacio = False           # Bandera de bloqueo por tanque vacio
 # Debounce/filtrado del flotador para evitar cambios rapidos por rebotes
 flotador_ultimo_raw = flotador.value()
 flotador_count = 0
-FLOTADOR_STABLE_COUNT = 3  # numero de lecturas iguales necesarias antes de aceptar el cambio
+FLOTADOR_STABLE_COUNT = 5  # numero de lecturas iguales necesarias antes de aceptar el cambio
 
 
 
@@ -581,7 +581,7 @@ def encender_bomba(forzado_manual=False):
     global ultimo_tanque_vacio_ts
     if ultimo_tanque_vacio_ts and (time.time() - ultimo_tanque_vacio_ts) < TANQUE_LOCK_TIME:
         print("[BOMBA] Bloqueada temporalmente tras detección reciente de tanque vacio.")
-        publicar_evento("bomba_bloqueada_reciente", "Bloqueo temporal tras tanque vacio.")
+        publicar_alarma("bomba_bloqueada_reciente", "Bloqueo temporal tras tanque vacio.")
         return
 
     if not bomba_estado:
