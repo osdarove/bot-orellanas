@@ -1,1 +1,7 @@
 py -m mpremote connect COM5 run main.py
+
+git config --global --list
+
+
+git config --global user.name "oscar Rodriguez"
+git config --global user.email "osdarove@gmail.com"
