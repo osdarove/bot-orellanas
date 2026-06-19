@@ -111,7 +111,7 @@ def handle_update(update):
         send_message(chat_id, 'Comandos disponibles:', keyboard)
         return
 
-        if text == 'estado':
+    if text == 'estado':
         success = publish_command('estado')
         if not success:
             send_message(chat_id, 'Error enviando comando de estado al dispositivo.')
