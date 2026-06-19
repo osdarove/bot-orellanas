@@ -1,9 +1,8 @@
 import os
+import json
 import logging
 import time
-
-from telegram import ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+import requests
 import paho.mqtt.client as mqtt
 
 # Configuration from env
@@ -29,6 +28,8 @@ COMMANDS = [
     'estado',
 ]
 
+BASE_URL = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}'
+
 # Create a simple MQTT client used to publish commands
 mqtt_client = mqtt.Client()
 try:
@@ -37,46 +38,80 @@ except Exception as e:
     logger.warning('Could not connect MQTT at startup: %s', e)
 
 
-def start(update, context):
-    """Handler for /start - show available commands with a keyboard."""
-    text_lines = ["Comandos disponibles:\n"]
-    for cmd in COMMANDS:
-        text_lines.append(f"- {cmd}")
-    text = "\n".join(text_lines)
+def send_message(chat_id, text, keyboard=None):
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'MarkdownV2',
+    }
+    if keyboard:
+        payload['reply_markup'] = json.dumps({'keyboard': keyboard, 'resize_keyboard': True, 'one_time_keyboard': False})
 
-    # Build keyboard: 3 columns
-    keyboard = [COMMANDS[i:i+3] for i in range(0, len(COMMANDS), 3)]
-
-    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
-    update.message.reply_text(text, reply_markup=reply_markup)
+    resp = requests.post(f'{BASE_URL}/sendMessage', json=payload, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
 
 
-def handle_text(update, context):
-    """When user sends a text (or presses keyboard), if it's a known command publish to MQTT."""
-    text = update.message.text.strip().lower()
-    user = update.effective_user
+def build_keyboard():
+    return [COMMANDS[i:i+3] for i in range(0, len(COMMANDS), 3)]
 
-    if text in COMMANDS:
-        # Try to publish; if publish fails, attempt reconnect once then retry
+
+def publish_command(command):
+    try:
+        mqtt_client.publish(MQTT_TOPIC_CMDS, command)
+        return True
+    except Exception:
+        logger.warning('MQTT publish failed, attempting reconnect...')
         try:
-            mqtt_client.publish(MQTT_TOPIC_CMDS, text)
-            update.message.reply_text(f"Comando enviado: {text}")
-            logger.info('User %s sent command %s', user.username or user.id, text)
-            return
+            mqtt_client.reconnect()
         except Exception:
-            logger.warning('MQTT publish failed, attempting reconnect...')
             try:
                 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-                mqtt_client.publish(MQTT_TOPIC_CMDS, text)
-                update.message.reply_text(f"Comando enviado: {text}")
-                logger.info('User %s sent command %s (after reconnect)', user.username or user.id, text)
-                return
             except Exception as e:
-                logger.exception('MQTT publish/reconnect failed: %s', e)
-                update.message.reply_text('Error enviando comando al dispositivo.')
-                return
+                logger.exception('MQTT reconnect failed: %s', e)
+                return False
 
-    update.message.reply_text('Comando no reconocido. Usa /start para ver la lista.')
+        try:
+            mqtt_client.publish(MQTT_TOPIC_CMDS, command)
+            return True
+        except Exception as e:
+            logger.exception('MQTT publish failed after reconnect: %s', e)
+            return False
+
+
+def handle_update(update):
+    message = update.get('message') or update.get('edited_message')
+    if not message:
+        return
+
+    chat_id = message['chat']['id']
+    text = message.get('text', '').strip().lower()
+    if not text:
+        return
+
+    if text == '/start':
+        keyboard = build_keyboard()
+        send_message(chat_id, 'Comandos disponibles:', keyboard)
+        return
+
+    if text in COMMANDS:
+        success = publish_command(text)
+        if success:
+            send_message(chat_id, f'Comando enviado: {text}')
+        else:
+            send_message(chat_id, 'Error enviando comando al dispositivo.')
+    else:
+        send_message(chat_id, 'Comando no reconocido. Usa /start para ver la lista.')
+
+
+def get_updates(offset=None, timeout=30):
+    params = {'timeout': timeout}
+    if offset:
+        params['offset'] = offset
+
+    resp = requests.get(f'{BASE_URL}/getUpdates', params=params, timeout=timeout + 10)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def main():
@@ -84,15 +119,20 @@ def main():
         logger.error('TELEGRAM_TOKEN no configurado. Exporta la variable de entorno.')
         return
 
-    updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-    dp = updater.dispatcher
-
-    dp.add_handler(CommandHandler('start', start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
-
-    logger.info('Starting Telegram bot (polling)')
-    updater.start_polling()
-    updater.idle()
+    offset = None
+    logger.info('Starting Telegram polling bot')
+    while True:
+        try:
+            response = get_updates(offset=offset)
+            for update in response.get('result', []):
+                offset = update['update_id'] + 1
+                handle_update(update)
+        except requests.HTTPError as e:
+            logger.exception('Telegram API error: %s', e)
+            time.sleep(5)
+        except Exception as e:
+            logger.exception('Unexpected error: %s', e)
+            time.sleep(5)
 
 
 if __name__ == '__main__':
