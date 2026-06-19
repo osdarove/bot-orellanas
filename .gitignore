@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+.venv/
+env/
+venv/
+ESP32_MICROPYTHON.bin
+*.bin
+.DS_Store
