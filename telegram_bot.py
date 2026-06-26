@@ -26,6 +26,7 @@ COMMANDS = [
     'primordios',
     'fructificacion',
     'estado',
+    'actualizar'
 ]
 
 BASE_URL = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}'
@@ -89,7 +90,11 @@ def handle_update(update):
     if not text:
         return
 
-    if text == '/start':
+    # Si el usuario escribe con barra inclinada (ej: /actualizar o /estado), se la quitamos
+    if text.startswith('/'):
+        text = text[1:]
+
+    if text == 'start':
         keyboard = build_keyboard()
         send_message(chat_id, 'Comandos disponibles:', keyboard)
         return
@@ -97,11 +102,16 @@ def handle_update(update):
     if text in COMMANDS:
         success = publish_command(text)
         if success:
-            send_message(chat_id, f'Comando enviado: {text}')
+            # Mensaje amigable de confirmación para el usuario en Telegram
+            if text == 'actualizar':
+                send_message(chat_id, '📥 Orden de actualización enviada al ESP32 via MQTT. Comprobando GitHub...')
+            else:
+                send_message(chat_id, f'Comando enviado: {text}')
         else:
             send_message(chat_id, 'Error enviando comando al dispositivo.')
     else:
         send_message(chat_id, 'Comando no reconocido. Usa /start para ver la lista.')
+
 
 
 def get_updates(offset=None, timeout=30):
