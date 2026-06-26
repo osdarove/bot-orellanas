@@ -194,19 +194,21 @@ def main():
     offset = None
     logger.info('Starting Telegram polling bot')
     while True:
-        try:
-            response = get_updates(offset=offset)
-            for update in response.get('result', []):
-                offset = update['update_id'] + 1
-                handle_update(update)
-      except requests.HTTPError as e:
-                logger.error("Status: %s", e.response.status_code)
-                logger.error("Body: %s", e.response.text)
-                time.sleep(5)
-        except Exception as e:
-            logger.exception('Unexpected error: %s', e)
-            time.sleep(5)
+    try:
+        response = get_updates(offset=offset)
 
+        for update in response.get('result', []):
+            offset = update['update_id'] + 1
+            handle_update(update)
+
+    except requests.HTTPError as e:
+        logger.error("Status: %s", e.response.status_code)
+        logger.error("Body: %s", e.response.text)
+        time.sleep(5)
+
+    except Exception as e:
+        logger.exception("Unexpected error: %s", e)
+        time.sleep(5)
 
 if __name__ == '__main__':
     main()
