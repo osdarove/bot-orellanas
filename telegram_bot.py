@@ -185,30 +185,33 @@ def main():
 
     mqtt_client.on_connect = on_connect
     mqtt_client.on_message = on_message
+
     try:
         mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
         mqtt_client.loop_start()
     except Exception as e:
-        logger.exception('Could not start MQTT client: %s', e)
+        logger.exception("Could not start MQTT client: %s", e)
 
     offset = None
-    logger.info('Starting Telegram polling bot')
+    logger.info("Starting Telegram polling bot")
+
     while True:
-    try:
-        response = get_updates(offset=offset)
+        try:
+            response = get_updates(offset=offset)
 
-        for update in response.get('result', []):
-            offset = update['update_id'] + 1
-            handle_update(update)
+            for update in response.get("result", []):
+                offset = update["update_id"] + 1
+                handle_update(update)
 
-    except requests.HTTPError as e:
-        logger.error("Status: %s", e.response.status_code)
-        logger.error("Body: %s", e.response.text)
-        time.sleep(5)
+        except requests.HTTPError as e:
+            logger.error("Status Code: %s", e.response.status_code)
+            logger.error("Response Body: %s", e.response.text)
+            time.sleep(5)
 
-    except Exception as e:
-        logger.exception("Unexpected error: %s", e)
-        time.sleep(5)
+        except Exception as e:
+            logger.exception("Unexpected error: %s", e)
+            time.sleep(5)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
