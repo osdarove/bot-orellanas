@@ -29,6 +29,7 @@ COMMANDS = [
     'primordios',
     'fructificacion',
     'estado',
+    'actualizar', # 👈 Confirmado en la lista oficial de comandos permitidos
 ]
 
 BASE_URL = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}'
@@ -118,6 +119,7 @@ def handle_update(update):
     if not text:
         return
 
+    # ⚡ Sanitizado: Permite limpiar comandos tipo /actualizar o /estado escritos a mano
     if text.startswith('/'):
         text = text[1:]
         if '@' in text:
@@ -152,10 +154,14 @@ def handle_update(update):
         state_request['processed'] = False
         return
 
+    # 📥 Procesador unificado para comandos estándar y el desencadenador del OTA
     if text in COMMANDS:
         success = publish_command(text)
         if success:
-            send_message(chat_id, f'Comando enviado: {text}')
+            if text == 'actualizar':
+                send_message(chat_id, '📥 Orden de actualización enviada al ESP32 por MQTT. Comprobando GitHub...')
+            else:
+                send_message(chat_id, f'Comando enviado con éxito: {text}')
         else:
             send_message(chat_id, 'Error enviando comando al dispositivo.')
     else:
