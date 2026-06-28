@@ -75,6 +75,7 @@ COMANDOS_VALIDOS = {
     "bomba_off",
     "vent_on",
     "vent_off",
+    "vent_auto",
 }
 
 TECLADO_BOTONES = [
@@ -82,7 +83,7 @@ TECLADO_BOTONES = [
     ["auto", "incubacion"],
     ["primordios", "fructificacion"],
     ["bomba_on", "bomba_off"],
-    ["vent_on", "vent_off"],
+    ["vent_on", "vent_off", "vent_auto"],
 ]
 
 MENSAJE_BIENVENIDA = "Comandos disponibles"
