@@ -426,19 +426,23 @@ class MqttBridge:
 
 def formatear_estado(data):
     """
-    Construye el mensaje bonito de estado a partir del JSON del ESP32.
-    Nunca se muestra el JSON crudo al usuario.
-
-    Importante: cuando los sensores DHT22 del ESP32 fallan, el firmware
-    envía null para temperatura/humedad. data.get(clave, default) solo
-    usa el default si la clave NO EXISTE, pero aquí la clave sí existe
-    con valor None, así que se normaliza explícitamente a "N/D".
+    Construye el mensaje de estado a partir del JSON enviado por el ESP32.
     """
+
     temperatura = data.get("temperatura")
     humedad = data.get("humedad")
-    bomba = data.get("bomba", None)
-    ventilador = data.get("ventilador", None)
+
+    bomba = data.get("bomba")
+    ventilador = data.get("ventilador")
+
+    modo_bomba = data.get("modo_bomba", "N/D")
+    modo_ventilador = data.get("modo_ventilador", "N/D")
+
+    etapa = data.get("etapa", "N/D")
     modo = data.get("modo", "N/D")
+
+    tanque = data.get("tanque", "N/D")
+
     wifi = data.get("wifi")
     version = data.get("version", "N/D")
 
@@ -446,16 +450,31 @@ def formatear_estado(data):
     humedad_txt = "N/D" if humedad is None else f"{humedad}"
     wifi_txt = "N/D" if wifi is None else f"{wifi}"
 
-    bomba_txt = "Encendida" if bomba is True else ("Apagada" if bomba is False else "N/D")
-    vent_txt = "Encendido" if ventilador is True else ("Apagado" if ventilador is False else "N/D")
+    bomba_estado = (
+        "Encendida"
+        if bomba is True
+        else ("Apagada" if bomba is False else "N/D")
+    )
+
+    ventilador_estado = (
+        "Encendido"
+        if ventilador is True
+        else ("Apagado" if ventilador is False else "N/D")
+    )
 
     return (
         "🌡 Estado del Invernadero\n\n"
         f"🌡 Temperatura: {temperatura_txt} °C\n"
-        f"💧 Humedad: {humedad_txt} %\n"
-        f"🚿 Bomba: {bomba_txt}\n"
-        f"🌀 Ventilador: {vent_txt}\n"
-        f"🧠 Modo: {modo}\n"
+        f"💧 Humedad: {humedad_txt} %\n\n"
+
+        f"🚿 Bomba: {bomba_estado}\n"
+        f"⚙️ Modo bomba: {modo_bomba}\n\n"
+
+        f"🌀 Ventilador: {ventilador_estado}\n"
+        f"⚙️ Modo ventilador: {modo_ventilador}\n\n"
+
+        f"🍄 Etapa: {etapa}\n"
+        f"🛢 Tanque: {tanque}\n"
         f"📡 WiFi: {wifi_txt} dBm\n"
         f"🔖 Firmware: {version}"
     )
